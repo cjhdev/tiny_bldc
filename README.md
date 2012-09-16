@@ -13,7 +13,7 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 * 100Kbit two-wire bus for control, configuration and data collection
 * Bootloader
 
-## Excluded
+### Excluded
 * PPM
 * UART
 * Braking
@@ -22,8 +22,8 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 * Sensored position detection
 
 ## Status of Project
-Bootloader bootloading on prototype hardware.
-Application under development.
+* Bootloader bootloading on prototype hardware.
+* Application under development.
 
 ## Documentation
 [PR01 Two-Wire Bridging Protocol](http://cjh.id.au/doc/doc0002-0.01.pdf)
@@ -38,7 +38,7 @@ More to come.
 
 ## Communication
 ### Interface
-The ESC is controlled, configured and updated through a 100Kbit two-wire serial interface.
+100Kbit two-wire bus.
 
 This interface is ideal for the following reasons:
 * Multidrop
@@ -54,9 +54,6 @@ This interface is ideal for the following reasons:
 * Flight protocol; broadcast and unicast modes for delivering throttle settings and retrieving status information.
 
 Multiple protocols are able to exist at the same time through definition of separate address ranges.
-
-## Bootloader
-The bootloader compiles from this repository. 
 
 ## License
 BSD.
