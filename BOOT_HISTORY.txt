@@ -1,0 +1,5 @@
+dev0002: History of changes to Bootloader
+--------------------------------------------------------------------------------
+V0.01:
+FEATURE: PR02/PR03 Layer complete. Communication with ESC possible.
+FEATURE: Firmware and bootloader image checking.
