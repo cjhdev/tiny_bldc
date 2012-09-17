@@ -21,14 +21,12 @@ CFLAGS = -O2 -Wall -mmcu=$(MCU) -funsigned-char -funsigned-bitfields  \
 
 LDFLAGS = -Wl,-Map=$@.map,--cref
 
-#	$(OBJCOPY) -O ihex -j .text  $@.elf $(OUTFILE).bin
-
 # build bootloader
 boot: LDFLAGS += -nostartfiles -Wl,-Tboot.lnk
 boot: CFLAGS += -DBUILD=$(BUILD)
 boot: OUTFILE = $@_$(BUILD)_v$(BOOT_VERSION)
 boot: boot.o twi.o util.o db.o
-	$(CC) $^ $(LDFLAGS) -o $@.elf
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@.elf
 	$(OBJDUMP) -h -S $< > $@.lss
 	$(OBJCOPY) -O binary -j .text  $@.elf $(OUTFILE).bin
 	$(CHECKSUM) $(OUTFILE).bin
@@ -39,7 +37,7 @@ firm: LDFLAGS += -Wl,-Tfirm.lnk
 firm: CFLAGS += -DBUILD=$(BUILD)
 firm: OUTFILE = $@_$(BUILD)_v$(FIRM_VERSION)
 firm: bldc.o twi.o util.o db.o
-	$(CC) $^ $(LDFLAGS) -o $@.elf
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@.elf
 	$(OBJDUMP) -h -S $< > $@.lss
 	$(OBJCOPY) -O binary -j .text  $@.elf $(OUTFILE).bin
 	$(CHECKSUM) $(OUTFILE).bin
