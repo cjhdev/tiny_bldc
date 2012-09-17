@@ -36,6 +36,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <util/atomic.h>
 #endif
 
+#include <avr/wdt.h>
+
 /* release the bus, return to idle */
 #define TWI_NACK() do{\
     USICR &= ~((1<<USIWM0)|(1<<USIOIE));\
@@ -107,30 +109,42 @@ void twi_check_stop(void)
 
 /* start condition */
 #if !BOOTLOADER
-ISR(USI_START_vect, ISR_NOBLOCK)
+ISR(USI_START_vect)
+//ISR(USI_START_vect, ISR_NOBLOCK)
 #else
 void twi_start_irq(void)
 #endif
 {
+#if !BOOTLOADER
+    uint8_t sreg;
+#endif    
     TWI_DDR &= ~(1<<SDA_PIN);
 
     /* Note that the start detector triggers before SCL comes low.
      * It's important to wait for it (it will happen because of wire mode)
      * so that the bit counter can be reset.
      *
-     * Note that since SCL has been on it's way down since SDA was detected
-     * low while SCL was high, it is impossible for a STOP or another START
-     * condition to suprise us.
-     * */
+     * Stop at this point doesn't matter and should be impossible. */
     while(TWI_PIN & (1<<SCL_PIN));
 
     /* if previously recieving, go and process the message */
     if(twidriver.inlen){
+#if !BOOTLOADER
+        USICR &= ~(1<<USISIE);
+        sreg = SREG;
+        sei();
+#endif                
         usr_process();
         twidriver.inlen = 0;
+#if !BOOTLOADER
+        cli();
+        USICR |= (1<<USISIE);
+        SREG = sreg;
+#endif        
     }
 
     /* hold SCL on overflow condition; enable overflow interrupt */
+    USISR |= (1<<USIOIF);
     USICR |= (1<<USIWM0) | (1<<USIOIE);
 
     /* clear overflow bit counter */
@@ -139,16 +153,17 @@ void twi_start_irq(void)
     twidriver.state = TWI_ADDR;
 
     /* clear all flags */
-    USISR |= (1<<USIOIF)|(1<<USISIF)|(1<<USIPF);
+    USISR |= (1<<USISIF)|(1<<USIPF);
 }
 
 /* data counter overflow */
 #if !BOOTLOADER
-ISR(USI_OVF_vect, ISR_NOBLOCK)
+ISR(USI_OVF_vect)
 #else
 void twi_overflow_irq(void)
 #endif
 {
+    uint8_t sreg;
     uint8_t buf = USIDR;
 
     switch(twidriver.state){
@@ -167,8 +182,18 @@ void twi_overflow_irq(void)
             if(buf & 0x1){
 #if !BOOTLOADER
                 /* flight protocol */
-                if((buf & 0xfe) != twidriver.addr)
+                if((buf & 0xfe) != twidriver.addr){
+                    
+                    USICR &= ~(1<<USISIE);
+                    sreg = SREG;
+                    sei();
+                                        
                     usr_process();
+                    
+                    cli();
+                    USICR |= (1<<USISIE);
+                    SREG = sreg;                    
+                }
                 else
 #endif
                 /* host protocol */

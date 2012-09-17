@@ -383,8 +383,6 @@ void usr_process(void)
     /* unicast or broadcast throttle command */
     else{
 
-        twidriver.size = 0;
-
         /* read */
         if(twidriver.cmd & 0x1){
 
@@ -445,6 +443,7 @@ void main(void)
 #endif
 
 #if 1
+
     twi_init(db_get_addr());
     db_update_usr(STATE_MASK, STATE_IDLE);
 
@@ -509,7 +508,7 @@ void main(void)
 
         wdt_reset();
 
-#if 1
+#if 0
         /*two-wire not quite working yet...*/
         db_update_usr(0xff, FLAG_GOTOBOOT);
         wdt_enable(WDTO_15MS);  /*setup a wdt reset*/
