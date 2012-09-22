@@ -43,11 +43,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #if (BOOTLOADER == 1)
 /* do you want stop condition polling? */
-#define TWI_STOP    1
+#define TWI_STOP    0
+#define INTERRUPTS  0
 
 #else
 /* do you want stop condition polling? */
 #define TWI_STOP    0
+#define INTERRUPTS  0
 
 #endif
 

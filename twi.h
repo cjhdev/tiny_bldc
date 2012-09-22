@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /* driver states */
 typedef enum {
     TWI_IDLE = 0,   /*waiting for a start condition*/
+    TWI_START,      /*waiting for SCL to become low in start condition*/
     TWI_ADDR,       /*receiving address/cmd byte*/
     TWI_RX_ACK,     /*just sent /ACK to master*/
     TWI_TX_ACK,     /*just read /ACK from master*/

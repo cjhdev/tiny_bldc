@@ -31,12 +31,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 #include <avr/io.h>
 
-#if !BOOTLOADER
+#if INTERRUPTS
 #include <avr/interrupt.h>
 #include <util/atomic.h>
 #endif
-
-#include <avr/wdt.h>
 
 /* release the bus, return to idle */
 #define TWI_NACK() do{\
@@ -78,7 +76,7 @@ void twi_check_stop(void)
     USICR &= ~(1<<USIWM0);
 
     /* check if there is an outstanding message */
-#if !BOOTLOADER
+#if INTERRUPTS
     ATOMIC_BLOCK(ATOMIC_FORCEON){
 #endif
         /* disable overflow interrupt */
@@ -93,7 +91,7 @@ void twi_check_stop(void)
         else{
             twidriver.state = TWI_IDLE;
         }
-#if !BOOTLOADER
+#if INTERRUPTS
     }
 #endif
 
@@ -108,65 +106,92 @@ void twi_check_stop(void)
 #endif
 
 /* start condition */
-#if !BOOTLOADER
+#if INTERRUPTS
 ISR(USI_START_vect)
-//ISR(USI_START_vect, ISR_NOBLOCK)
 #else
 void twi_start_irq(void)
 #endif
 {
-#if !BOOTLOADER
+#if INTERRUPTS
     uint8_t sreg;
 #endif    
+
     TWI_DDR &= ~(1<<SDA_PIN);
 
-    /* Note that the start detector triggers before SCL comes low.
-     * It's important to wait for it (it will happen because of wire mode)
-     * so that the bit counter can be reset.
-     *
-     * Stop at this point doesn't matter and should be impossible. */
-    while(TWI_PIN & (1<<SCL_PIN));
-
-    /* if previously recieving, go and process the message */
+    /* if previously recieving, go and process the message;
+     * Nest interrupts here so the usr_process can take as long as needed. */
     if(twidriver.inlen){
-#if !BOOTLOADER
-        USICR &= ~(1<<USISIE);
+#if INTERRUPTS
+        /* turn off both twi interrupts */
+        USICR &= ~((1<<USISIE)|(1<<USIOIE));
         sreg = SREG;
         sei();
-#endif                
+#endif           
         usr_process();
         twidriver.inlen = 0;
-#if !BOOTLOADER
+#if INTERRUPTS
         cli();
-        USICR |= (1<<USISIE);
         SREG = sreg;
+        /* reenable start interrupt */
+        USICR |= (1<<USISIE);        
 #endif        
     }
 
-    /* hold SCL on overflow condition; enable overflow interrupt */
-    USISR |= (1<<USIOIF);
-    USICR |= (1<<USIWM0) | (1<<USIOIE);
+    /* start condition doesn't mean that SCL is low yet. For
+     * this reason we setup the overflow interrupt to catch the falling edge
+     * of SCL if it ever happens.
+     */
 
-    /* clear overflow bit counter */
-    USISR &= ~((1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3));
+    /* overflow interrupt enable and hold SCL when it happens */
+    USICR |= (1<<USIWM0)|(1<<USIOIE);
 
-    twidriver.state = TWI_ADDR;
+    /* Is SCL still high? */
+    if(TWI_PIN & (1<<SCL_PIN)){
 
-    /* clear all flags */
+        /* instead of waiting, preload counter to detect falling SCL */
+        USISR |= (1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3)|(1<<USIOIF);
+
+        twidriver.state = TWI_START;
+    }
+
+    /* SCL became low since we last checked above. Do everything the overflow
+     * handler would do and then advance the state */
+    if(!(TWI_PIN & (1<<SCL_PIN))){
+
+        /* clear overflow bit counter */
+        USISR &= ~((1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3));
+
+        twidriver.state = TWI_ADDR;
+
+        /* make sure the overflow interrupt is cleared */
+        USISR |= (1<<USIOIF);
+    }
+    
+    /* clear this flag */
     USISR |= (1<<USISIF)|(1<<USIPF);
 }
 
 /* data counter overflow */
-#if !BOOTLOADER
+#if INTERRUPTS
 ISR(USI_OVF_vect)
 #else
 void twi_overflow_irq(void)
 #endif
 {
+#if INTERRUPTS
     uint8_t sreg;
+#endif    
     uint8_t buf = USIDR;
 
     switch(twidriver.state){
+    case TWI_START:
+
+        /* clear overflow bit counter */
+        USISR &= ~((1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3));
+
+        twidriver.state = TWI_ADDR;
+        break;
+
     case TWI_ADDR:
 
         /* message for this device... */
@@ -183,16 +208,17 @@ void twi_overflow_irq(void)
 #if !BOOTLOADER
                 /* flight protocol */
                 if((buf & 0xfe) != twidriver.addr){
-                    
+#if INTERRUPTS                    
                     USICR &= ~(1<<USISIE);
                     sreg = SREG;
                     sei();
-                                        
+#endif                    
                     usr_process();
-                    
-                    cli();
+#if INTERRUPTS                    
+                    cli();                    
+                    SREG = sreg;
                     USICR |= (1<<USISIE);
-                    SREG = sreg;                    
+#endif                    
                 }
                 else
 #endif

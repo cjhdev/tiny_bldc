@@ -45,6 +45,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #error "BUILD code not appropriate for firmware"
 #endif
 
+#ifndef NO_BOOTLOADER
+#define NO_BOOTLOADER 0
+#endif
+
 volatile uint8_t usr[2] __attribute__((section(".USERVAR")));
 volatile uint8_t usr_reserved[6] __attribute__((section(".USERVAR")));
 
@@ -502,21 +506,34 @@ void main(void)
 
 #endif
 
+#if INTERRUPTS
     sei();
+#endif    
 
     while(1){
 
         wdt_reset();
 
-#if 0
-        /*two-wire not quite working yet...*/
-        db_update_usr(0xff, FLAG_GOTOBOOT);
-        wdt_enable(WDTO_15MS);  /*setup a wdt reset*/
-        while(1);
-#endif
+#if !INTERRUPTS
 
+        /* start condition */
+        if(USISR & (1<<USISIF))
+            twi_start_irq();
+
+        else if(twidriver.state){
+            /* overflow condition */
+            if(USISR & (1<<USIOIF))
+                twi_overflow_irq();
+#if TWI_STOP
+            /* poll for stop condition */
+            else
+                twi_check_stop();
+#endif
+        }
+#else
 #if TWI_STOP
         twi_check_stop();
+#endif
 #endif
     }
 }
