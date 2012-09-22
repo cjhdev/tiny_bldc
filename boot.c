@@ -324,21 +324,21 @@ void main(void)
 }
 
 /* just a link into the .initN chain */
-void __init(void) __attribute__((naked)) __attribute__ ((section (".init0")));
-void __init(void){}
-
-/* we turn off the default start file because it puts stuff in the vector
- * table */
-void goto_boot(void) __attribute__((naked)) __attribute__ ((section (".init9")));
-void goto_boot(void)
-{
+void __init0(void) __attribute__((naked)) __attribute__ ((section (".init0")));
+void __init0(void){
     /* clear the zero register */
-    asm volatile("clr r0\n");
+    asm volatile("clr r1\n");
 
     /* SREG already cleared on ATTINYx61 */
 
     /* SP already at RAMEND on ATTINYx61 */
+}
 
+/* we turn off the default start file because it puts stuff in the vector
+ * table */
+void __init9(void) __attribute__((naked)) __attribute__ ((section (".init9")));
+void __init9(void)
+{
     asm volatile ("rjmp main\n");
 }
 
@@ -346,23 +346,23 @@ void goto_boot(void)
 void vector_table(void) __attribute__((naked)) __attribute__ ((section (".vectors")));
 void vector_table(void)
 {
-    asm volatile ("rjmp __init\n");
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+2));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+4));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+6));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+8));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+10));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+12));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+14));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+16));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+18));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+20));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+22));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+24));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+26));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+28));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+30));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+32));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+34));
-    asm volatile ("rjmp %0\n" :: "p" (SIZEOF_BOOT+36));
+    asm volatile ("rjmp __init0\n");
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+2));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+4));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+6));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+8));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+10));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+12));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+14));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+16));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+18));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+20));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+22));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+24));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+26));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+28));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+30));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+32));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+34));
+    asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START+36));
 }
