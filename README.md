@@ -4,14 +4,14 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 
 ## Features
 ### Included
-* 12bit PWM at 8, 16 or 32KHz (lower or higher if application suits, though there are practical limits and tradeoffs)
+* 10bit PWM at 8, 16 or 32KHz (lower or higher if application suits, though there are practical limits and tradeoffs)
 * Synchronous rectification
 * BEMF position detection
 * Hardware based current limiting
 * Temperature measurement
 * Supply voltage measurement
 * 100Kbit two-wire bus for control, configuration and data collection
-* Bootloader
+* Bootloader and bootloader updater
 
 ### Excluded
 * PPM
@@ -57,6 +57,7 @@ Multiple protocols are able to exist at the same time through definition of sepa
 
 ## License
 BSD.
+
 
 Cameron Harper 2012
 (cam@cjh.id.au) 
