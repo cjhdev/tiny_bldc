@@ -52,26 +52,28 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 volatile uint8_t usr[2] __attribute__((section(".USERVAR")));
 volatile uint8_t usr_reserved[6] __attribute__((section(".USERVAR")));
 
-volatile const struct b_id1 firmwareid __attribute__((section(".INFO"))) = {
+volatile const struct b_id1 firmwareid __attribute__((section(".INFO"))) =
+{
     BUILD,
     VERSION,
     MAGIC
 };
 
 volatile const uint16_t firm_crc __attribute__((section(".CRC"))) = 0x0000;
-const uint8_t BLOCKSIZE = SIZEOF_BLOCK;
 
 #if 0
-/* work in progress, mostly notes */
-
 typedef struct {
 
     /* parameters */
-    uint8_t blanking;
-    uint8_t min_v;
+    uint8_t blanking;   /* blanking cycles between commutes */
+    uint8_t min_v;      /* minimum supply voltage alarm */
+    uint8_t max_t;      /* maximum temperature alarm */
 
-    #define DIR_CW()
-
+    
+    /* running variables */
+    uint8_t ph;         /* phase voltage result */
+    uint8_t v;          /*voltage / compare point*/
+    
     /* IDLE
      * START    I haven't worked out the start system yet...
      * RUN
@@ -84,6 +86,7 @@ typedef struct {
     #define BLANK       3
     #define UNDERVOLT   4
     #define LIMIT       5
+    #define RISING      0x40
     #define CW          0x80
     uint8_t state;
 
@@ -92,44 +95,48 @@ typedef struct {
     #define FLAG_CURRENT_L1     0x04    /*the last phase to current limit*/
     #define FLAG_CURRENT_L2     0x08
     #define FLAG_CURRENT_L3     0x10
-    #define FLAG_OVERTEMP       0x11    /*not supported but reserved all the same*/
+    #define FLAG_OVERTEMP       0x20    
     uint8_t flags;
 
-    uint8_t sect_b;     /*blanking counter*/
-
-    uint16_t sect_m;        /*measured time from start of sector*/
-    uint16_t sect_size;     /*sector size for next commute*/
-    uint16_t sect;          /*time remaining until commute*/
-
-    uint8_t v;              /*voltage / compare point*/
+    uint8_t tmr_blank;      /* blanking counter */
     uint8_t phase;          /*active phase*/
-
 
 } pwm_driver_t;
 
-pwm_driver_t pwm;
-
-const uint8_t commute_table[2][6] PROGMEM = {
-    {(1<<PWMB_LO_PIN), (1<<PWMC_LO_PIN)}},
-    {PWMA_MASK, PWMB_MASK},
-    {(1<<PWMC_LO_PIN), (1<<PWMA_LO_PIN)},
-    {PWMB_MASK, PWMC_MASK},
-    {(1<<PWMA_LO_PIN), (1<<PWMC_LO_PIN)},
-    {PWMC_MASK, PWMA_MASK},
-    {(1<<PWMC_LO_PIN), (1<<PWMB_LO_PIN)}
-};
+volatile pwm_driver_t pwm;
 
 
+/* Sample handler
+ *
+ * The ADC is manually triggered with each successive sample triggering the
+ * next. This frees up a timer where it isn't really required and allows the
+ * ADC to run as fast as the prescaler (and other higher priority interrupts)
+ * will allow it. In practice the sample frequency becomes predictable but
+ * will not be as precise as a timer driven ADC.
+ * 
+ * During the commutation blanking period the interrupt samples Vin and
+ * temperature. These results are compared to the programmed limit values and
+ * may set warning flags and/or limit the throttle setting depending on device
+ * configuration.
+ *
+ * The rest of the time phase voltage is sampled and compared to Vin to detect
+ * a zero crossing.
+ *
+ * timer0 is used to measure the time between zero crossings.
+ *
+ */
 ISR(ADC_vect)
 {
-    uint8_t ph, on, off;
-
-    pwm.sect_m++;
+    uint8_t cross = 0;
 
     switch(ADMUX & 0xf){
-    case AMUX_VIN:  /*vin sampled during blanking time*/
+    case AMUX_VIN:  
+    case AMUX_TEMP:
 
-        pwm.v = ADCH;   //add filter
+        if((ADMUX & 0xf) == AMUX_VIN)
+            pwm.v = ADCH;   //add filter
+        else
+            pwm.t = ADCH;   //add filter
 
         if(pwm.v < pwm.min_v)
             usr.flags |= FLAG_UNDERVOLT;
@@ -139,8 +146,7 @@ ISR(ADC_vect)
         switch(pwm.state){
         case BLANK:
 
-            if(pwm.sect_b)pwm.sect_b--;
-            else{
+            if(!pwm.sect_b){
                 pwm.state = RUN;
                 ADMUX &= 0xf0;
                 ADMUX |= commute_table[2][pwm.phase];
@@ -169,61 +175,120 @@ ISR(ADC_vect)
     case AMUX_B:
     case AMUX_C:
 
-        ph = ADCH;  //add filter
+        pwm.ph = ADCH;  
 
-        /* count down until time to commute */
-        if(pwm.sect){
-            pwm.sect--;
+        /* detect zero crossing...hmmm */
+        if(pwm.flags & RISING){
+            if(pwm.ph >= pwm.v){
+                pwm.flags &= ~(RISING);
+                cross = 1;
+            }
         }
         else{
-
-            pwm.phase++;
-            if(pwm.phase == 6)
-                pwm.phase = 0;
-
-            if(pwm.phase & 0x1){
-
-                on = commute_table[(DIR_CW())?1:0][pwm.phase];
-                off = commute_table[(DIR_CW())?0:1][pwm.phase];
-                pwm.phase = commute_table[2][pwm.phase];
-
-                TCCR1E &= ~(off);
-                TCCR1E |= on;
+            if(pwm.ph <= pwm.v){
+                pwm.flags |= RISING;
+                cross = 1;
             }
+        }
+
+        if(cross){
+
+            /*halt the timer*/
+            TCCR0B |= (1 << TSM);
+
+            /* not locked - this is the first crossing */
+            if(pwm.flags & FLAG_NOLOCK){
+                
+            }
+            /* if locked, save the measured time*/
             else{
-
-                on = commute_table[(DIR_CW())?1:0][pwm.phase];
-                off = commute_table[(DIR_CW())?0:1][pwm.phase];
-                pwm.phase = commute_table[2][pwm.phase];
-
-                PWMB_LO_PORT &= ~(off);
-                PWMB_LO_PORT |= on;
+                pwm.sect = (TCNT0 / 3);
             }
 
-            /* load the new sector timing */
-            pwm.sect = pwm.sect_m;
-            /* load the new sector blanking */
-            pwm.sect_b = pwm.blank;
+            /* has the commute point been serviced yet? (unlikely) */
+            if(!(TIFR & (1 << OCF0A))){
 
-            pwm.state = BLANK;
-            ADMUX &= 0xf0;
-            ADMUX |= AMUX_VIN;
-        }
+                /* reset compare point relative to cleared timer */
+                if(OCR0 < TCNT0)
+                    OCR0 += 0xffff - TCNT0;
+                else
+                    OCR0 -= TCNT0;
 
-        /* detect zero crossing */
-        if((pwm.rising && (ph >= pwm.v))||(!pwm.rising && (ph <= pwm.v))){
-
-            pwm.next_sector = (pwm.ticks / 3);
-            pwm.ticks = 0;
-        }
+                /* ensure overflow never happened */
+                TIFR |= (1 << OCF0A);
+            }
+                
+            /* clear the counter to begin measuring again */
+            TCTN0 = 0;
+            
+            /* restart timer */
+            TCCR0B &= ~(1 << TSM);                
+        }        
     }
 
+    /* start next conversion */
+    ADCSRA |= (1 << ADSC);
+}
 
-    //preload next compare point
+/* every commute timeout a signal is turned on and another is turned off
+ * depending on the phase */
+const uint8_t commute_table[2][6] = {
+    {(1<<PWMB_LO_PIN), (1<<PWMC_LO_PIN)}},
+    {PWMA_MASK, PWMB_MASK},
+    {(1<<PWMC_LO_PIN), (1<<PWMA_LO_PIN)},
+    {PWMB_MASK, PWMC_MASK},
+    {(1<<PWMA_LO_PIN), (1<<PWMC_LO_PIN)},
+    {PWMC_MASK, PWMA_MASK},
+    {(1<<PWMC_LO_PIN), (1<<PWMB_LO_PIN)}
+};
+
+/* an overflow means that sync was lost, the control algorithm must be restarted */
+IST(TIMER0_OVF_vect)
+{
+    pwm.flags |= FLAG_NOLOCK;
+    TIMSK &= ~(TOIE0);
+}
+
+/* time to commute the next phase */
+ISR(TIMER0_COMPA_vect)
+{
+    pwm.phase++;
+    if(pwm.phase == 6)
+        pwm.phase = 0;
+
+    if(pwm.phase & 0x1){
+
+        on = commute_table[(DIR_CW())?1:0][pwm.phase];
+        off = commute_table[(DIR_CW())?0:1][pwm.phase];
+        pwm.phase = commute_table[2][pwm.phase];
+
+        TCCR1E &= ~(off);
+        TCCR1E |= on;
+    }
+    else{
+
+        on = commute_table[(DIR_CW())?1:0][pwm.phase];
+        off = commute_table[(DIR_CW())?0:1][pwm.phase];
+        pwm.phase = commute_table[2][pwm.phase];
+
+        PWMB_LO_PORT &= ~(off);
+        PWMB_LO_PORT |= on;
+    }
+
+    /* next commute time */
+    OCR0 += pwm.sect;
+
+    /* load the new sector blanking */
+    pwm.tmr_blank = pwm.blank;
+    pwm.state = BLANK;
+
+    ADMUX &= 0xf0;
+    ADMUX |= AMUX_VIN;
 }
 #endif
 
-static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uint8_t len)
+static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out,
+    uint8_t len)
 {
     int ret = 0;
 
@@ -301,15 +366,19 @@ static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uin
             out[ret++] = 2 + (sizeof(struct b_id1)*2);
 
             /* block size (little endian) */
-            out[ret++] = BLOCKSIZE;
+            out[ret++] = SPM_PAGESIZE;
             out[ret++] = 0x0;
 
             /* boot info */
-            copy_to_ram(mem_flash, out+ret, ADDR_BOOT_START+SIZEOF_BOOT-sizeof(struct b_id1)-2, sizeof(struct b_id1));    /*bootloader info*/
+            copy_to_ram(mem_flash, out+ret,
+                ADDR_BOOT_START+SIZEOF_BOOT-sizeof(struct b_id1)-2,
+                sizeof(struct b_id1));    /*bootloader info*/
             ret += sizeof(struct b_id1);
 
             /* firmware info */
-            copy_to_ram(mem_flash, out+ret, ADDR_FIRM_START+SIZEOF_FIRM-sizeof(struct b_id1)-2, sizeof(struct b_id1));
+            copy_to_ram(mem_flash, out+ret,
+                ADDR_FIRM_START+SIZEOF_FIRM-sizeof(struct b_id1)-2,
+                sizeof(struct b_id1));
             ret += sizeof(struct b_id1);
 
             break;
@@ -339,16 +408,16 @@ void usr_process(void)
     uint16_t set;
     int ret;
 
+    twidriver.size = 0;
+
     /* host command */
     if((twidriver.cmd & 0xfe) == twidriver.addr){
-
-        twidriver.size = 0;
 
         /* PR02 wrapper - check length and crc */
         if((twidriver.inlen < 2)
             ||((twidriver.inlen-2) != data[0])
-            ||(crc8_block(crc8_char(0xff, twidriver.cmd), data, twidriver.inlen-1)
-                != data[twidriver.inlen-1])
+            ||(crc8_block(crc8_char(0xff, twidriver.cmd), data,
+                twidriver.inlen-1) != data[twidriver.inlen-1])
             )
             return;
 
@@ -381,7 +450,8 @@ void usr_process(void)
             return;
         }
 
-        data[3+ret] = crc8_block(crc8_char(0xff, twidriver.cmd|0x1), data, 3+ret);
+        data[3+ret] = crc8_block(crc8_char(0xff, twidriver.cmd|0x1), data,
+            3+ret);
         twidriver.size = 3+ret+1;
     }
     /* unicast or broadcast throttle command */
@@ -394,7 +464,6 @@ void usr_process(void)
             if((twidriver.cmd & 0xfe) == TWIADDR_BROADCAST)
                 return;
 
-            //fill response data here
         }
         /* write */
         else{
@@ -421,7 +490,8 @@ void usr_process(void)
                 set |= data[1];
             }
 
-            //change the throttle set point
+            /* apply the new set point */
+            OCR1A = set & 0x3ff;
         }
     }
 }
@@ -430,9 +500,8 @@ void main(void)__attribute__((noreturn));
 
 void main(void)
 {
-    wdt_enable(WDTO_1S);
-    wdt_reset();
-
+    //wdt_enable(WDTO_1S);
+    
 #if NO_BOOTLOADER
 
     /*power stage pins*/
@@ -445,77 +514,105 @@ void main(void)
      * ADC1, ADC3, AREF, ADC5, ADC6, ADC9 */
     DIDR0 = 0xda; DIDR1 = 0x40;
 #endif
-
-#if 1
-
-    twi_init(db_get_addr());
+    
     db_update_usr(STATE_MASK, STATE_IDLE);
 
-#else
-    /* work in progress */
-
-    /* adc; enable and clock at 1MHz note. this will produce the max
-     * advertised sample rate of 13us per conversion */
-    ADCSRA = 0x80 | 0x4;
-    /*left adjust; enable 2.54 reference with capacitor*/
-    ADMUX = 0xe0; ADCSRB = 0x08;
-
-    /* analog comparator for overcurrent fault
-     * enable 1.1V reference for positive */
-    ACSRA = 0x40;
-
-    /*settings*/
+    /* settings */
     db_init();
 
-    /*comms*/
+    /* comms */
     twi_init(db_get_addr());
+#if 0
+    /* adc;
+     * enable
+     * clock = 16Mhz / 16 == 13us conversion time */
+    ADCSRA = (1<<ADEN)|(1<<ADPS2);
 
-    /*pwm*/
+    /* left adjust;
+     * enable 2.54 reference with capacitor */
+    ADMUX = (1<<REFS0)|(1<<REFS1);
+    ADCSRB = (1<<REFS2);
+    
+    /* ac;
+     * enable 1.1V reference for positive */
+    ACSRA = (1<<ACBG);
 
-    /* 7 global pwm invert
-     * 6 not sure
-     * 5..4 deadtime prescaler
-     * 3..0 clock selector/prescaler */
-    TCCR1B = 0x0d;
+    
+    /* PWM module */
 
-    /* 7..6 phA mode
-     * 5..4 phB mode
-     * 3..2 phC mode
+    /* PWM1X - Invert all PWM ports
+     * DTPS11:DTPS10 - dead time prescaler (x1,x2,x4,x8)
+     * CS13:CS12:CS11:CS10 - clock prescale 0 to 16384
+     * 
+     * 64MHz / 4096 */
+    TCCR1B = (1<<PWM1X) | (1<<CS13) | (1<<CS12) | (1<<CS10);
+
+    /* Pin mode
+     * 
+     * COM1A1S:COM1A0S (0:1) set 0x000, clear at compare match
+     * COM1B1S:COM1B0S (0:1) set 0x000, clear at compare match
+     * COM1D1:COM1D0 (0:1) set 0x000, clear at compare match
+     *
+     * Note that after the FP unit triggers, these modes are cleared
+     * to disconnect the output
      */
-    TCCR1C = 0x40 | 0x10 | 0x04;
+    PWM_ENGAGE();
 
-    /* enable fault interrupt
-     * enable fault function
-     * enable noise 4 cycle cancel (review this...)
-     * trip on rising edge
-     * enable comparator to trip fault function
-     * enable fast pwm6 mode
-     */
-    TCCR1D = 0x80 | 0x40 | 0x20 | 0x10 | 0x2 | 0x4;
+    /* Fault protection
+     *
+     * FPEN1 - enable fault protect
+     * FPNC1 - 4 cycle noise canceller
+     * FPES1 - edge select (1 rising / 0 falling)
+     * FPAC1 - source from analog comparator output
+     *
+     * setup the FP here but do not enable
+     * 
+     * Wave Generation Mode
+     * 
+     * WGM11:WGM10 (1:0) PWM6 /single slope
+     * WGM11:WGM10 (1:1) PWM6 /dual slope (unused)
+     *
+     * */
+    TCCR1D = |(1<<FPNC1)|(1<<FPES1)|(1<<FPAC1)|(1<<WGM11);
 
-
-    /* top */
+    /* Set top to maximum resolution */
     OCR1C = 0xff;
 
-    /* 7..4 hi side dead time
-     * 3..0 lo side dead time */
+    /* Dead time
+     * 
+     * 7..4 high side dead time
+     * 3..0 low side dead time
+     *
+     * 0..16 x DT prescale x timer tick
+     *
+     * */
     DT1 = 0xff;
 
 
-    /* self test here */
+    /* motor test
+     *
+     * 1: Conductivity on all phases
+     * For each phase, set hi, measure voltage on remaining 3 phases
+     *
+     * todo.
+     *
+     * */
 
+
+    /* timer0;
+     * 16bit mode /64 prescale
+     */
+    TCCR0B = (1<<TCW0) | (1<<CS01) | (1<<CS00);
 #endif
 
-#if INTERRUPTS
     sei();
-#endif    
 
+    
     while(1){
 
         wdt_reset();
 
 #if !INTERRUPTS
-
         /* start condition */
         if(USISR & (1<<USISIF))
             twi_start_irq();
@@ -524,16 +621,7 @@ void main(void)
             /* overflow condition */
             if(USISR & (1<<USIOIF))
                 twi_overflow_irq();
-#if TWI_STOP
-            /* poll for stop condition */
-            else
-                twi_check_stop();
-#endif
         }
-#else
-#if TWI_STOP
-        twi_check_stop();
-#endif
-#endif
+#endif        
     }
 }

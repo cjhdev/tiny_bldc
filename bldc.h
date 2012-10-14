@@ -42,30 +42,23 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #if (BOOTLOADER == 1)
-/* do you want stop condition polling? */
-#define TWI_STOP    0
+
 #define INTERRUPTS  0
 
 #else
-/* do you want stop condition polling? */
-#define TWI_STOP    0
-#define INTERRUPTS  0
+
+#define INTERRUPTS  1
 
 #endif
 
 /* program space offsets */
-//#define SIZEOF_MCU FLASHEND
-#define SIZEOF_MCU 8192
-#define SIZEOF_BOOT 2048
-#define SIZEOF_FIRM SIZEOF_MCU-SIZEOF_BOOT
-#define SIZEOF_VECTOR _VECTORS_SIZE
+#define SIZEOF_MCU      8192
+#define SIZEOF_BOOT     2048
+#define SIZEOF_FIRM     (SIZEOF_MCU-SIZEOF_BOOT)
+#define SIZEOF_VECTOR   _VECTORS_SIZE
 
 #define ADDR_BOOT_START 0
 #define ADDR_FIRM_START SIZEOF_BOOT
-
-/* program block size */
-#define SIZEOF_BLOCK SPM_PAGESIZE
-#define FIRM_BLOCKS (SIZEOF_FIRM / SIZEOF_BLOCK)
 
 /*PR02+PR03*/
 #define COMM_OVERHEAD (2 + 4 + 2)
@@ -125,6 +118,14 @@ extern volatile uint8_t usr[2];
 #define PWMB_MASK   0x0c
 #define PWMC_MASK   0x30
 
+/* After the fault protection unit triggers, the pin mode needs to be
+ * reapplied */
+#define PWM_ENGAGE() do{TCCR1C = (1<<COM1A0S)|(1<<COM1B0S)|(1<<COM1D0);}while(0)
+
+/* enable/disable the fault protection unit */
+#define PWM_FP_ENABLE()     TCCR1D |= (1<<FPEN1);
+#define PWM_FP_DISABLE()    TCCR1D &= ~(1<<FPEN1);    
+
 /*two-wire ports*/
 #define TWI_PORT    PORTA
 #define TWI_DDR     DDRA
@@ -139,6 +140,10 @@ extern volatile uint8_t usr[2];
 #define AMUX_C
 #define AMUX_CUR
 #define AMUX_VIN
+
+/* start timer driven sampling */
+#define ADC_ENGAGE()
+#define ADC_DISENGAGE()
 
 /*object IDs*/
 #define OBJ_MODE            0xf000
