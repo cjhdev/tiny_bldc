@@ -3,7 +3,6 @@
 Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled multi-rotor applications. The target MCU is the Atmel AVR attiny861.
 
 ## Features
-### Included
 * 10bit PWM at 8, 16 or 32KHz (lower or higher if application suits, though there are practical limits and tradeoffs)
 * Synchronous rectification
 * BEMF position detection
@@ -11,15 +10,7 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 * Temperature measurement
 * Supply voltage measurement
 * 100Kbit two-wire bus for control, configuration and data collection
-* Bootloader and bootloader updater
-
-### Excluded
-* PPM
-* UART
-* Braking
-* High speed commutation
-* PID speed control
-* Sensored position detection
+* Bootloader
 
 ## Status of Project
 * Bootloader bootloading on prototype hardware.
@@ -29,6 +20,8 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 [PR01 Two-Wire Bridging Protocol](http://cjh.id.au/doc/doc0002-0.01.pdf)
 
 [PR02 Two-Wire Transfer Protocol](http://cjh.id.au/doc/doc0004-0.01.pdf)
+
+[PR03 General Application Protocol](http://cjh.id.au/doc/doc0005-0.01.pdf)
 
 More to come.
 
