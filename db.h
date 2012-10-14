@@ -43,12 +43,21 @@ struct db_addr {
 };
 
 void db_init(void);
+
+/* get two-wire address from eeprom;
+ * returns default if parity is bad or value is outside of acceptable host
+ * range. */
 uint8_t db_get_addr(void);
 
 #if !BOOTLOADER
+/* write a two-wire address to eeprom;
+ * returns failure if value is outside of acceptable host range */
 int db_set_address(uint8_t address);
 #endif
 
+
+/* update the shared user field;
+ * bits are first cleared, then set */
 void db_update_usr(uint8_t clr, uint8_t set);
 
 #endif

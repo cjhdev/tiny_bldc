@@ -261,7 +261,6 @@ void twi_overflow_irq(void)
     USISR |= (1<<USIOIF);   /* clear overflow flag */
 }
 
-/* init called once before interrupts enabled */
 void twi_init(uint8_t addr)
 {
     twidriver.state = TWI_IDLE;
