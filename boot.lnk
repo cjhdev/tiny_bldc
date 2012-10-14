@@ -157,10 +157,13 @@ SECTIONS
      _etext = . ;
      
   }  > text = 0xff
-  
-  .data	  : AT (ADDR (.text) + SIZEOF (.text))
+
+  .USERVAR	  : AT (ADDR (.text) + SIZEOF (.text))
   {
     *(.USERVAR)
+  } > data  
+  .data	  : AT (ADDR (.text) + SIZEOF (.text) + SIZEOF (.USERVAR))
+  {
      PROVIDE (__data_start = .) ;
     *(.data)
     *(.data*)
