@@ -26,7 +26,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #include <stdint.h>
 #include <avr/pgmspace.h>
-#include <avr/eeprom.h>
 
 #include "bldc.h"
 #include "util.h"
@@ -82,7 +81,9 @@ static uint8_t get_byte(enum memtype type, uint16_t addr)
     case mem_flash:
         return pgm_read_byte_near(addr);
     case mem_eeprom:
-        return eeprom_read_byte(((uint8_t *)addr));
+        EEAR = addr;
+        EECR |= (1<<EERE);
+        return EEDR;        
     default:
         return 0;
     }
