@@ -27,7 +27,7 @@ More to come.
 
 ## Tools
 
-[Two-wire Bridge](http://github/cjhdev/dev0001)
+[Two-wire Bridge](https://github/cjhdev/dev0001)
 
 ## Communication
 ### Interface
