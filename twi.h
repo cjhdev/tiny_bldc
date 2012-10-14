@@ -64,9 +64,6 @@ void twi_overflow_irq(void);
 /* called before interrupts enabled */
 void twi_init(uint8_t addr);
 
-/* stop conditions must be polled */
-void twi_check_stop(void);
-
 /* application message handler */
 void usr_process();
 

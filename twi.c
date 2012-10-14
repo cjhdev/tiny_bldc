@@ -62,49 +62,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 volatile twi_driver_t twidriver;
 
-#if TWI_STOP
-/* poll for a stop condition */
-void twi_check_stop(void)
-{
-    if((twidriver.state == TWI_IDLE) || !(USISR & (1<<USIPF)))
-        return;
-
-    /* clear the flag */
-    USISR |= (1<<USIPF);
-
-    /* do not hold SCL on overflow condition */
-    USICR &= ~(1<<USIWM0);
-
-    /* check if there is an outstanding message */
-#if INTERRUPTS
-    ATOMIC_BLOCK(ATOMIC_FORCEON){
-#endif
-        /* disable overflow interrupt */
-        USICR &= ~(1<<USIOIE);
-
-        if(twidriver.inlen){
-
-            /* disable start interrupt */
-            USICR &= ~(1<<USISIE);
-            twidriver.state = TWI_BUSY;
-        }
-        else{
-            twidriver.state = TWI_IDLE;
-        }
-#if INTERRUPTS
-    }
-#endif
-
-    /* process the outstanding message, then reenable start interrupt */
-    if(twidriver.state == TWI_BUSY){
-        usr_process();
-        twidriver.inlen = 0;
-        USICR |= (1<<USISIE);
-        twidriver.state = TWI_IDLE;
-    }
-}
-#endif
-
 /* start condition */
 #if INTERRUPTS
 ISR(USI_START_vect)
@@ -149,7 +106,8 @@ void twi_start_irq(void)
     if(TWI_PIN & (1<<SCL_PIN)){
 
         /* instead of waiting, preload counter to detect falling SCL */
-        USISR |= (1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3)|(1<<USIOIF);
+        USISR |= (1<<USICNT0)|(1<<USICNT1)|(1<<USICNT2)|(1<<USICNT3)|
+            (1<<USIOIF);
 
         twidriver.state = TWI_START;
     }
