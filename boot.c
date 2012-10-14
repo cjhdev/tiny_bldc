@@ -51,16 +51,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 volatile uint8_t usr[2] __attribute__((section(".USERVAR")));
 volatile uint8_t usr_reserved[6] __attribute__((section(".USERVAR")));
 
-volatile const struct b_id1 boot_id __attribute__((section(".INFO"))) = {
+volatile const struct b_id1 boot_id __attribute__((section(".INFO"))) =
+{
     BUILD,
     VERSION,
     MAGIC
 };
 
 volatile const uint16_t boot_crc __attribute__((section(".CRC"))) = 0x0000;
-const uint8_t BLOCKSIZE = SIZEOF_BLOCK;
 
-static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uint8_t len)
+static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out,
+    uint8_t len)
 {
     int ret = 0;
     uint16_t pos = 0;
@@ -70,7 +71,7 @@ static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uin
     uint16_t w;
 
     /* get block address from id */
-    if((id < (OBJ_FIRM+FIRM_BLOCKS)) && (id >= OBJ_FIRM)){
+    if((id < (OBJ_FIRM+(SIZEOF_FIRM / SPM_PAGESIZE))) && (id >= OBJ_FIRM)){
         pos = (id - OBJ_FIRM);
         id = OBJ_FIRM;
     }
@@ -110,9 +111,9 @@ static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uin
         /* program firmware; blocksize == page size */
         case OBJ_FIRM:
 
-            if((len != (SIZEOF_BLOCK+2))
+            if((len != (SPM_PAGESIZE+2))
                 ||(in[0] != PR03_DT_OCTET)
-                ||(in[1] != SIZEOF_BLOCK)){
+                ||(in[1] != SPM_PAGESIZE)){
                 out[ret++] = PR03_RESP_TEMPFAIL;
                 break;
             }
@@ -121,29 +122,20 @@ static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uin
 
             page = ADDR_FIRM_START + (pos * SPM_PAGESIZE);
 
-            if(compare_to_ram(mem_flash, in, page, SIZEOF_BLOCK)){
+            boot_page_erase(page);
+            boot_spm_busy_wait();
 
-                boot_page_erase(page);
-                boot_spm_busy_wait();
+            for(i=0; i < SPM_PAGESIZE; i+=2){
 
-                for(i=0; i < SPM_PAGESIZE; i+=2){
+                w = in[i+1];
+                w <<= 8;
+                w |= in[i];
 
-                    w = in[i+1];
-                    w <<= 8;
-                    w |= in[i];
-
-                    boot_page_fill(page+i, w);
-                }
-
-                boot_page_write(page);
-                boot_spm_busy_wait();
-#if 1
-                if(compare_to_ram(mem_flash, in, page, SIZEOF_BLOCK)){
-                    out[ret++] = PR03_RESP_TEMPFAIL;
-                    return ret;
-                }
-#endif
+                boot_page_fill(page+i, w);
             }
+
+            boot_page_write(page);
+            boot_spm_busy_wait();
 
             out[ret++] = PR03_RESP_SUCCESS;
             break;
@@ -174,15 +166,19 @@ static int usr_function(uint8_t cmd, uint16_t id, uint8_t *in, uint8_t *out, uin
             out[ret++] = 2 + (sizeof(struct b_id1)*2);
 
             /* block size (little endian) */
-            out[ret++] = BLOCKSIZE;
+            out[ret++] = SPM_PAGESIZE;
             out[ret++] = 0x0;
 
             /*bootloader info*/
-            copy_to_ram(mem_flash, out+ret, ADDR_BOOT_START+SIZEOF_BOOT-sizeof(struct b_id1)-2, sizeof(struct b_id1));
+            copy_to_ram(mem_flash, out+ret,
+                ADDR_BOOT_START+SIZEOF_BOOT-sizeof(struct b_id1)-2,
+                sizeof(struct b_id1));
             ret += sizeof(struct b_id1);
 
             /* firmware info */
-            copy_to_ram(mem_flash, out+ret, ADDR_FIRM_START+SIZEOF_FIRM-sizeof(struct b_id1)-2, sizeof(struct b_id1));
+            copy_to_ram(mem_flash, out+ret,
+                ADDR_FIRM_START+SIZEOF_FIRM-sizeof(struct b_id1)-2,
+                sizeof(struct b_id1));
             ret += sizeof(struct b_id1);
 
             break;
@@ -261,8 +257,7 @@ void main(void)
     uint8_t magic[] = MAGIC;
 
     wdt_enable(WDTO_1S);
-    wdt_reset();
-
+    
     /*power stage pins*/
     PWM_PORT |=  (1<<PWMA_HI) | (1<<PWMA_LO) | (1<<PWMB_HI) | (1<<PWMB_LO) |
         (1<<PWMC_HI) | (1<<PWMC_LO);
@@ -287,14 +282,15 @@ void main(void)
     if(crc16_block2(0xffff, mem_flash, ADDR_FIRM_START, SIZEOF_FIRM)
         ||compare_to_ram(mem_flash, magic,
             ADDR_FIRM_START+SIZEOF_FIRM-sizeof(struct b_id1)-2+
-                offsetof(struct b_id1, magic), sizeof(magic)))
+                offsetof(struct b_id1, magic), sizeof(magic))
+                )
         db_update_usr(0x0, FLAG_FIRMCRC);
     else
         db_update_usr(FLAG_FIRMCRC, 0x0);
 
     /* boot application? */
-    if(!(*usr & FLAG_FIRMCRC) && !(*usr & FLAG_GOTOBOOT)){
-        asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START));
+    if(!(*usr & (FLAG_FIRMCRC|FLAG_GOTOBOOT))){
+        asm volatile ("rjmp %0\n" :: "p" (ADDR_FIRM_START));        
     }
 
     db_update_usr(FLAG_GOTOBOOT|STATE_MASK, STATE_BOOTLOADER);
@@ -314,11 +310,6 @@ void main(void)
             /* overflow condition */
             if(USISR & (1<<USIOIF))
                 twi_overflow_irq();
-#if TWI_STOP
-            /* poll for stop condition */
-            else
-                twi_check_stop();
-#endif
         }
     }
 }
@@ -331,7 +322,7 @@ void __init0(void){
 
     /* SREG already cleared on ATTINYx61 */
 
-    /* SP already at RAMEND on ATTINYx61 */
+    /* SP already at RAMEND on ATTINYx61 */    
 }
 
 /* we turn off the default start file because it puts stuff in the vector
@@ -343,7 +334,8 @@ void __init9(void)
 }
 
 /* jump to the application vector table */
-void vector_table(void) __attribute__((naked)) __attribute__ ((section (".vectors")));
+void vector_table(void) __attribute__((naked))
+    __attribute__ ((section (".vectors")));
 void vector_table(void)
 {
     asm volatile ("rjmp __init0\n");
