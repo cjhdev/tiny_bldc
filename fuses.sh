@@ -16,11 +16,11 @@ EXTEND=0x00 #I read somewhere that AVR dude reads unused fuses as 0 is this true
 # 0x02: 1 (null)
 # 0x01: 0 (self programming enable)
 #
-HIGH=0xc5
+HIGH=0xd5
 # 0x80: 1 (external reset disable)
 # 0x40: 1 (debug wire enabled)
 # 0x20: 0 (enable serial programming_
-# 0x10: 0 (WDT always on)
+# 0x10: 1 (WDT always on)
 # 0x08: 0 (eeprom is saved through chip erase)
 # 0x04: 1 (BOD2) (101 = 2.7V typical brownout, 4.5 might be a bit close)
 # 0x02: 0 (BOD1)
