@@ -32,7 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "db.h"
 #include "util.h"
 
-#if !BOOTLOADER
+#if (BUILD_VERSION > 0)
 void db_init(void)
 {
 }
@@ -52,7 +52,7 @@ uint8_t db_get_addr(void)
         return TWIADDR_DEFAULT_HOST;
 }
 
-#if !BOOTLOADER
+#if (BUILD_VERSION > 0)
 
 int db_set_address(uint8_t address)
 {

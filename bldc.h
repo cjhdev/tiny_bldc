@@ -27,27 +27,83 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef BLDC_H
 #define BLDC_H
 
+/* build code system
+ *
+ * Lower word is the device id; Upper word identifies the software features
+ *
+ *
+ * Lower Word: (device id)
+ * Bit 0..15:
+ * 0: B1 ESC
+ *
+ *
+ * Upper Word:
+ * Bit 16..23: (software version)
+ * 0: Bootloader
+ * 1: Firmware
+ *
+ * bit 24..31: (version features)
+ *
+ * (0 - Bootloader)
+ * bit24: spare
+ * bit25: spare
+ * bit26: spare
+ * bit27: spare
+ * bit28: spare
+ * bit29: spare
+ * bit30: spare
+ * bit31: spare
+ *
+ * (1 - Bootstrap)
+ * bit24: spare
+ * bit25: spare
+ * bit26: spare
+ * bit27: spare
+ * bit28: spare
+ * bit29: spare
+ * bit30: spare
+ * bit31: spare
+ *
+ * (2 - Firmware)
+ * bit24: spare
+ * bit25: spare
+ * bit26: spare
+ * bit27: spare
+ * bit28: spare
+ * bit29: spare
+ * bit30: spare
+ * bit31: spare
+ *
+ * */
 #ifndef BUILD
-#error "you need to define BUILD externally"
+#error "BUILD must be defined"
 #endif
 
 #if (BUILD & 0xffff)
-#error "BUILD lower word should be 0x0000 for B1 ESC"
-#endif
+#error "BUILD lower word should be 0x0000 for this ESC"
+#endif  
 
-#if ((BUILD & 0xFF0000) == 0)
-#define BOOTLOADER 1
-#else
-#define BOOTLOADER 0
-#endif
+#define BUILD_VERSION ((BUILD & 0xFF0000) >> 16)
 
-#if (BOOTLOADER == 1)
+/* 0 (bootloader) */
+#if (BUILD_VERSION == 0)
 
 #define INTERRUPTS  0
 
-#else
+/* 1 (bootstrap) */
+#elif (BUILD_VERSION == 1)
+
+#define INTERRUPTS  0
+
+/* 2 (firmware) */
+#elif (BUILD_VERSION == 2)
 
 #define INTERRUPTS  1
+
+/* unknown */
+#else
+
+#error "unrecognised build version"
 
 #endif
 
@@ -138,8 +194,9 @@ extern volatile uint8_t usr[2];
 #define AMUX_A
 #define AMUX_B
 #define AMUX_C
-#define AMUX_CUR
-#define AMUX_VIN
+#define AMUX_I
+#define AMUX_V
+#define AMUX_T
 
 /* start timer driven sampling */
 #define ADC_ENGAGE()
@@ -155,44 +212,7 @@ extern volatile uint8_t usr[2];
 /* magic number to identify firmware from unprogrammed flash */
 #define MAGIC {0xab,0xcd}
 
-/* build code system
- *
- * Lower word is the device id; Upper word identifies the software features
- *
- *
- * Lower Word: (device id)
- * Bit 0..15:
- * 0: B1 ESC
- *
- *
- * Upper Word:
- * Bit 16..23: (software version)
- * 0: Bootloader
- * 1: Firmware
- *
- * bit 24..31: (version features)
- *
- * (0 - Bootloader)
- * bit24: spare
- * bit25: spare
- * bit26: spare
- * bit27: spare
- * bit28: spare
- * bit29: spare
- * bit30: spare
- * bit31: spare
- *
- * (1 - Firmware)
- * bit24: spare
- * bit25: spare
- * bit26: spare
- * bit27: spare
- * bit28: spare
- * bit29: spare
- * bit30: spare
- * bit31: spare
- *
- * */
+/* image id */
 struct b_id1 {
     uint32_t build;     /* build code */
     uint8_t version[6]; /* "M.mmT" e.g. "1.01A" */

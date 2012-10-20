@@ -41,13 +41,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /*############################################################################*/
 
-#if (BOOTLOADER == 1)
-#error "BUILD code not appropriate for firmware"
-#endif
-
-#ifndef NO_BOOTLOADER
-#define NO_BOOTLOADER 0
-#endif
 
 volatile uint8_t usr[2] __attribute__((section(".USERVAR")));
 volatile uint8_t usr_reserved[6] __attribute__((section(".USERVAR")));
@@ -64,226 +57,361 @@ volatile const uint16_t firm_crc __attribute__((section(".CRC"))) = 0x0000;
 #if 0
 typedef struct {
 
-    /* parameters */
-    uint8_t blanking;   /* blanking cycles between commutes */
-    uint8_t min_v;      /* minimum supply voltage alarm */
-    uint8_t max_t;      /* maximum temperature alarm */
+    /* blanking cycles between commutes - minimum of 2 */
+    uint8_t blanking;   
+
+    /* minimum supply voltage alarm */
+    uint8_t min_v_lower;      
+    uint8_t min_v_upper;      
+
+    /* temperature alarm and limit setting */
+    uint8_t max_t_lower;    
+    uint8_t max_t_upper
+    uint16_t t_limit;   
+    
+    /* bit 7: temperature limiting enabled
+     * bit 6: voltage limiting enabled
+     *
+     * */
+    uint8_t limit_mode;
+
+    uint16_t min_pwm;   /* minimum allowable running setpoint */
+    uint16_t max_pwm;   /* maximum allowable running setpoint */
+    uint16_t set_pwm;   /* last set point */
+
+    /* align setting */
+    uint16_t t_align;   /* align period (ticks) */
+    uint16_t P_align;   /* align set point */
+    uint16_t dt_align;  /* align ramp period */
+    uint16_t dP_align;  /* align ramp PWM */
+
+    /* start setting (follows align) */
+    uint16_t dt_start;  /* start ramp period */
+    uint16_t dP_start;  /* start ramp PWM */
+    uint16_t T_start;   /* start commute period */
+    uint16_t dT_start;  /* start commute ramp */
+
+    /* sync setting (follows start) */
+    uint16_t sync_count;  /* number of correct commutations before mode change */
+    
+    uint8_t adc_ph;         /* phase voltage result */
+    uint8_t adc_v;          /* voltage / compare point */
+    uint8_t adc_t;          /* temperature */
 
     
-    /* running variables */
-    uint8_t ph;         /* phase voltage result */
-    uint8_t v;          /*voltage / compare point*/
-    
-    /* IDLE
-     * START    I haven't worked out the start system yet...
-     * RUN
-     * BLANK    while blanking we sample vin and temperature
-     *
-     *  */
-    #define IDLE        0
-    #define START       1
-    #define RUN         2
-    #define BLANK       3
-    #define UNDERVOLT   4
-    #define LIMIT       5
-    #define RISING      0x40
-    #define CW          0x80
+
+    #define COMMUTE     0x80    /*actively blanking*/
+    #define I_LIMIT     0x40    /*current limit*/
+    #define T_LIMIT     0x20    /*temperature limit*/
+    #define V_LIMIT     0x10    /*voltage limit*/
+    #define IDLE        0       
+    #define ALIGN       1   /* aligning the rotor */
+    #define START       2   /* open loop commutation */
+    #define SYNC1       3   /* ready to close loop, waiting for next frame */
+    #define SYNC2       4   /* detecting first crossing */
+    #define SYNC3       5   /* collecting valid crossings */
+    #define RUN         6   /* closed loop */
     uint8_t state;
 
-    #define FLAG_NOLOCK         0x01    /*BEMF not detected*/
-    #define FLAG_UNDERVOLT      0x02    /*supply voltage less than minimum*/
-    #define FLAG_CURRENT_L1     0x04    /*the last phase to current limit*/
-    #define FLAG_CURRENT_L2     0x08
-    #define FLAG_CURRENT_L3     0x10
-    #define FLAG_OVERTEMP       0x20    
-    uint8_t flags;
+    /* State Machine:
+     *
+     * D = duty cycle
+     * T = commute frame width
+     * 
+     * IDLE:
+     * - D is 0 or less than the minimum run D
+     * - To transition, user must set D equal to or greater
+     *   than minimum D
+     *
+     * ALIGN:
+     * - D is set to P_align on the starting phase
+     * - Every dt_align ticks, D incremented by dP_align
+     * - State advances after t_align ticks
+     *
+     * START:
+     * - Every dt_start ticks, D incremented by dP_start
+     * - T set to T_start
+     * - T decremented by dT_start every 
+     * 
+     * SYNC1:
+     * - Wait for start of next commute frame
+     *
+     * SYNC2:
+     * - Wait to detect first zero crossing
+     * 
+     * SYNC3:
+     * - Wait to detect 3 successive zero crossings
+     *
+     * RUN:
+     * - Running from zero cross detector
+     *
+     */
+
+
+
+    uint16_t tmr_start; /* period timer */
+    uint16_t tmr_ramp;  /* acceleration timer */
+
+
+    uint8_t dt;
+    uint8_t dp;
+
+    #define X_RISING    0x80   /* rising (1); falling (0) */
+    #define X_CROSSED   0x40   /* cross detected this frame */
+    uint8_t x_state;
 
     uint8_t tmr_blank;      /* blanking counter */
-    uint8_t phase;          /*active phase*/
+    uint8_t phase;          /* active phase */
+
+    uint16_t tmr_measure;
+    uint16_t tmr_commute;
+
+    uint16_t sector;
 
 } pwm_driver_t;
 
 volatile pwm_driver_t pwm;
 
 
-/* Sample handler
- *
- * The ADC is manually triggered with each successive sample triggering the
- * next. This frees up a timer where it isn't really required and allows the
- * ADC to run as fast as the prescaler (and other higher priority interrupts)
- * will allow it. In practice the sample frequency becomes predictable but
- * will not be as precise as a timer driven ADC.
+/* CW:
  * 
- * During the commutation blanking period the interrupt samples Vin and
- * temperature. These results are compared to the programmed limit values and
- * may set warning flags and/or limit the throttle setting depending on device
- * configuration.
+ * 1. A -> C; measure B;
+ * 2. B -> C; measure A;
+ * 3. B -> A; measure C;
+ * 4. C -> A; measure B;
+ * 5. C -> B; measure A;
+ * 6. A -> B; measure C;
+ * 
+ * CCW:
  *
- * The rest of the time phase voltage is sampled and compared to Vin to detect
- * a zero crossing.
- *
- * timer0 is used to measure the time between zero crossings.
- *
+ * 1. C -> A; measure B; 
+ * 2. C -> B; measure A;
+ * 3. A -> B; measure C;
+ * 4. A -> C; measure B;
+ * 5. B -> C; measure A;
+ * 6. B -> A; measure C;
  */
+const uint8_t commute_table[][] = {
+    {(1<<PWMB_LO_PIN),  (1<<PWMC_LO_PIN), AMUX_B},
+    {PWMA_MASK,         PWMB_MASK,        AMUX_A},
+    {(1<<PWMC_LO_PIN),  (1<<PWMA_LO_PIN), AMUX_C},
+    {PWMB_MASK,         PWMC_MASK,        AMUX_B},
+    {(1<<PWMA_LO_PIN),  (1<<PWMC_LO_PIN), AMUX_A},
+    {PWMC_MASK,         PWMA_MASK,        AMUX_C}    
+};
+
 ISR(ADC_vect)
 {
     uint8_t cross = 0;
 
-    switch(ADMUX & 0xf){
-    case AMUX_VIN:  
-    case AMUX_TEMP:
+    switch(ADMUX & 0x1f){
+    case AMUX_V:  
+    case AMUX_T:
+    case AMUX_I:
 
-        if((ADMUX & 0xf) == AMUX_VIN)
-            pwm.v = ADCH;   //add filter
-        else
-            pwm.t = ADCH;   //add filter
+        switch(ADMUX & 0x1f){
+        case AMUX_V:
 
-        if(pwm.v < pwm.min_v)
-            usr.flags |= FLAG_UNDERVOLT;
-        else
-            usr.flags &= ~FLAG_UNDERVOLT;
+            pwm.adc_v = ADCH;   
 
-        switch(pwm.state){
-        case BLANK:
+            /* under voltage limiting */
+            if(pwm.state & V_LIMIT){
 
-            if(!pwm.sect_b){
-                pwm.state = RUN;
-                ADMUX &= 0xf0;
-                ADMUX |= commute_table[2][pwm.phase];
+                if(pwm.adc_v > pwm.min_v_upper)
+                    pwm.state &= ~(V_LIMIT);
             }
+            else if(pwm.adc_v < pwm.min_v_lower){
+                    pwm.state |= V_LIMIT;
+            }
+
+            ADMUX &= 0xe0;
+            ADMUX |= AMUX_T;
             break;
 
-        case UNDERVOLT:
+        case AMUX_T:
+        
+            pwm.adc_t = ADCH;   
 
-            if(!(pwm.state & FLAG_UNDERVOLT)){
+            /* over temperature limiting */
+            if(pwm.state & I_LIMIT){
 
-                //restart
+                if(pwm.adc_t < pwm.max_t_lower)
+                    pwm.state = ~(I_LIMIT);
+                
             }
+            else if(pwm.adc_t > pwm.max_t_upper){
+
+                pwm.state |= I_LIMIT;
+
+                if((pwm.limit_mode & 0x80) && (pwm.setpoint > pwm.t_limit))
+                    pwm.setpoint = pwm.t_limit;                
+            }
+
+            ADMUX &= 0xe0;
+            ADMUX |= AMUX_V;
             break;
-
-        case LIMIT:
-
-            if(!(pwm.state & FLAG_LIMIT)){
-
-                //restart
+            
+        case AMUX_I:
+            
+            /* can current limit be reset? */
+            if(ADCH > ((1.1 * 0xff)/2.5)){
+                //yes
             }
-            break
+            
+            ADMUX &= 0xe0;
+            ADMUX |= AMUX_V;            
         }
+
+        /* align */
+        if((pwm.state & 0x7) == ALIGN){
+
+            /* ramp the align duty */
+            if(pwm.tmr_ramp)pwm.tmr_ramp--;
+            else{
+
+                pwm.tmr_ramp = pwm.dt_align;                    
+                OCR1A += pwm.dP_align;                
+            }
+
+            /* wait for next state */
+            if(pwm.tmr_start)pwm.tmr_start--;
+            else{
+
+                pwm.state++;    /* start */
+
+                /* setup commute timer to interrupt immediately */
+                OCR0A = TCNT0L;
+                TIMSK |= (1<<OCIE0A);
+                TIFR |= (1<<OCF0A);
+
+                pwm.tmr_start = pwm.t_start;
+                pwm.tmr_ramp = pwm.dt_start;
+            }
+        }
+
+        /* start */
+        if((pwm.state & 0x7) == START){
+
+            /* ramp the start duty */
+            if(pwm.tmr_ramp)pwm.tmr_ramp--;
+            else{
+
+                pwm.tmr_ramp = pwm.dt_start;                    
+                OCR1A += pwm.dP_start;                
+            }
+
+            /* wait for next state */
+            if(pwm.tmr_start)pwm.tmr_start--;
+            else{
+
+                pwm.state++;    /* sync1 (wait for next frame) */
+
+                /* sample the phase voltage */
+                ADMUX &= 0xe0;
+                ADMUX |= commute_table[pwm.phase][2];
+
+                /* clear measurement */
+                pwm.tmr_measure = 0;
+            }
+        }
+
+        /* blanking timeout */
+        if(((pwm.state & 0x7) >= SYNC) && (pwm.state & COMMUTE)){
+        
+            if(!pwm.tmr_blank){
+
+                pwm.state &= ~(COMMUTE);
+                
+                ADMUX &= 0xe0;
+                ADMUX |= commute_table[pwm.phase][2];                
+            }
+            else{
+                pwm.tmr_blank--;
+            }
+        }
+        
         break;
 
     case AMUX_A:
     case AMUX_B:
     case AMUX_C:
 
-        pwm.ph = ADCH;  
-
-        /* detect zero crossing...hmmm */
-        if(pwm.flags & RISING){
-            if(pwm.ph >= pwm.v){
-                pwm.flags &= ~(RISING);
-                cross = 1;
-            }
+        /* discard this result if we are meant to be blanking */
+        if(pwm.state & COMMUTE){
+            ADMUX &= 0xe0;
+            ADMUX |= AMUX_V;
+            break;
         }
-        else{
-            if(pwm.ph <= pwm.v){
-                pwm.flags |= RISING;
-                cross = 1;
+        
+        pwm.adc_ph = ADCH;  
+
+        /* look for the crossing */
+        if(!(pwm.x_state & X_CROSSED)){
+
+            if(pwm.x_state & X_RISING){
+
+                if(pwm.ph >= pwm.v)
+                    pwm.x_state |= X_CROSSED;
             }
-        }
-
-        if(cross){
-
-            /*halt the timer*/
-            TCCR0B |= (1 << TSM);
-
-            /* not locked - this is the first crossing */
-            if(pwm.flags & FLAG_NOLOCK){
-                
-            }
-            /* if locked, save the measured time*/
             else{
-                pwm.sect = (TCNT0 / 3);
+
+                if(pwm.ph <= pwm.v)
+                    pwm.x_state |= X_CROSSED;
             }
 
-            /* has the commute point been serviced yet? (unlikely) */
-            if(!(TIFR & (1 << OCF0A))){
+            if(pwm.x_state & X_CROSSED){
 
-                /* reset compare point relative to cleared timer */
-                if(OCR0 < TCNT0)
-                    OCR0 += 0xffff - TCNT0;
-                else
-                    OCR0 -= TCNT0;
-
-                /* ensure overflow never happened */
-                TIFR |= (1 << OCF0A);
-            }
+                pwm.sect = pwm.tmr_measure;
+                pwm.phase = pwm.tmr_phase;
+                pwm.tmr_measure = 0;
                 
-            /* clear the counter to begin measuring again */
-            TCTN0 = 0;
-            
-            /* restart timer */
-            TCCR0B &= ~(1 << TSM);                
-        }        
+                if((pwm.state & 0xf) < RUN)
+                    pwm.state++;
+            }
+        }
+    }    
+
+    if((pwm.state & 0x7) > SYNC1){
+        pwm.tmr_measure++;
+        
     }
-
-    /* start next conversion */
-    ADCSRA |= (1 << ADSC);
 }
 
-/* every commute timeout a signal is turned on and another is turned off
- * depending on the phase */
-const uint8_t commute_table[2][6] = {
-    {(1<<PWMB_LO_PIN), (1<<PWMC_LO_PIN)}},
-    {PWMA_MASK, PWMB_MASK},
-    {(1<<PWMC_LO_PIN), (1<<PWMA_LO_PIN)},
-    {PWMB_MASK, PWMC_MASK},
-    {(1<<PWMA_LO_PIN), (1<<PWMC_LO_PIN)},
-    {PWMC_MASK, PWMA_MASK},
-    {(1<<PWMC_LO_PIN), (1<<PWMB_LO_PIN)}
-};
-
-/* an overflow means that sync was lost, the control algorithm must be restarted */
-IST(TIMER0_OVF_vect)
-{
-    pwm.flags |= FLAG_NOLOCK;
-    TIMSK &= ~(TOIE0);
-}
-
-/* time to commute the next phase */
+/* commute timer */
 ISR(TIMER0_COMPA_vect)
 {
+    /* set next commute frame */
+    OCR0A += pwm.frame;
+
     pwm.phase++;
     if(pwm.phase == 6)
         pwm.phase = 0;
 
     if(pwm.phase & 0x1){
 
-        on = commute_table[(DIR_CW())?1:0][pwm.phase];
-        off = commute_table[(DIR_CW())?0:1][pwm.phase];
-        pwm.phase = commute_table[2][pwm.phase];
-
+        on = commute_table[(pwm.state & CW)?1:0][pwm.phase];
+        off = commute_table[(pwm.state & CW)?0:1][pwm.phase];
+        
         TCCR1E &= ~(off);
         TCCR1E |= on;
     }
     else{
 
-        on = commute_table[(DIR_CW())?1:0][pwm.phase];
-        off = commute_table[(DIR_CW())?0:1][pwm.phase];
-        pwm.phase = commute_table[2][pwm.phase];
-
-        PWMB_LO_PORT &= ~(off);
-        PWMB_LO_PORT |= on;
+        on = commute_table[(pwm.state & CW)?1:0][pwm.phase];
+        off = commute_table[(pwm.state & CW)?0:1][pwm.phase];
+        
+        PWM_PORT &= ~(off);
+        PWM_PORT |= on;
     }
 
-    /* next commute time */
-    OCR0 += pwm.sect;
+    /* Prepare for commute blanking */
+    pwm.tmr_blank = pwm.blanking;
+    pwm.state |= COMMUTE;
 
-    /* load the new sector blanking */
-    pwm.tmr_blank = pwm.blank;
-    pwm.state = BLANK;
+    pwm.tmr_phase = 0;  /* phase offset */
 
-    ADMUX &= 0xf0;
-    ADMUX |= AMUX_VIN;
+    pwm.x_state &= ~(X_CROSSED);
+    pwm.x_state ^= X_RISING;
 }
 #endif
 
@@ -476,7 +604,8 @@ void usr_process(void)
                 if(twidriver.inlen < twidriver.addr)
                     return;
 
-                set = ((uint16_t)data[(twidriver.addr>>1)]) << 8;
+                set = data[(twidriver.addr>>1)];
+                set <<= 8;
                 set |= data[(twidriver.addr>>1)+1];
             }
             /* unicast setting;
@@ -490,19 +619,45 @@ void usr_process(void)
                 set |= data[1];
             }
 
+#if 0            
+            pwm.set_pwm = set;
+
             /* apply the new set point */
-            OCR1A = set & 0x3ff;
+            if(!(pwm.state & 0x7)){
+
+                /* do nothing */
+                if(set < pwm.pwm_min)
+                    return;
+
+                cli();
+
+                /* align mode */
+                pwm.mode++;
+                OCR1A = pwm.pwm_align;
+                pwm.tmr_start = pwm.align_ticks;
+
+                sei();
+            }
+            else if((pwm.state & 0x7) == RUN){
+                OCR1A = set & 0x3ff;
+            }
+#endif            
         }
     }
 }
+
+/* adds in some startup code if you don't have a bootloader */
+#ifndef NO_BOOTLOADER
+#define NO_BOOTLOADER 0
+#endif
 
 void main(void)__attribute__((noreturn));
 
 void main(void)
 {
-    //wdt_enable(WDTO_1S);
-    
 #if NO_BOOTLOADER
+
+    //wdt_enable(WDTO_1S);
 
     /*power stage pins*/
     PWM_PORT |=  (1<<PWMA_HI) | (1<<PWMA_LO) | (1<<PWMB_HI) | (1<<PWMB_LO) |
@@ -587,17 +742,6 @@ void main(void)
      *
      * */
     DT1 = 0xff;
-
-
-    /* motor test
-     *
-     * 1: Conductivity on all phases
-     * For each phase, set hi, measure voltage on remaining 3 phases
-     *
-     * todo.
-     *
-     * */
-
 
     /* timer0;
      * 16bit mode /64 prescale

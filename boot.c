@@ -44,8 +44,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /*############################################################################*/
 
-#if (BOOTLOADER == 0)
-#error "BUILD code not appropriate for bootloader"
+#if (BUILD_VERSION != 0)
+#error "BUILD code not for bootloader"
 #endif
 
 volatile uint8_t usr[2] __attribute__((section(".USERVAR")));

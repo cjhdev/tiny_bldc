@@ -154,7 +154,7 @@ void twi_overflow_irq(void)
 
         /* message for this device... */
         if( ((buf & 0xfe) == twidriver.addr)
-#if !BOOTLOADER
+#if (BUILD_VERSION > 0)
             ||((buf & 0xfe) == TWIADDR_BROADCAST)
             ||( (twidriver.addr < TWIADDR_FLIGHT_START) &&
                 ((buf & 0xfe) == (twidriver.addr+TWIADDR_FLIGHT_START)))
@@ -163,7 +163,7 @@ void twi_overflow_irq(void)
 
             /* if reading, something needs to be ready in the buffer */
             if(buf & 0x1){
-#if !BOOTLOADER
+#if (BUILD_VERSION > 0)
                 /* flight protocol */
                 if((buf & 0xfe) != twidriver.addr){
 #if INTERRUPTS                    
