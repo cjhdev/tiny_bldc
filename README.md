@@ -14,20 +14,11 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 
 ## Status of Project
 * Bootloader bootloading on prototype hardware.
-* Application under development.
 
 ## Documentation
-[PR01 Two-Wire Bridging Protocol](http://cjh.id.au/doc/doc0002-0.01.pdf)
+[PR01 Two-Wire Bridging Protocol](doc/doc0002-0.02.pdf)
 
-[PR02 Two-Wire Transfer Protocol](http://cjh.id.au/doc/doc0004-0.01.pdf)
-
-[PR03 General Application Protocol](http://cjh.id.au/doc/doc0005-0.01.pdf)
-
-More to come.
-
-## Tools
-
-[Two-wire Bridge](https://github.com/cjhdev/dev0001)
+[PR02 Two-Wire Transfer Protocol](doc/doc0004-0.01.pdf)
 
 ## Communication
 ### Interface
