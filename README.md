@@ -15,6 +15,13 @@ Firmware and bootloader for a low-cost BLDC ESC designed for radio controlled mu
 ## Status of Project
 * Bootloader bootloading on prototype hardware.
 
+## Prototype Hardware
+
+[Early prototype schematic](doc/reference_design.pdf)
+
+![image missing](doc/prototype_pcb.jpg "prototype hardware")
+
+
 ## Documentation
 [PR01 Two-Wire Bridging Protocol](doc/doc0002-0.02.pdf)
 
